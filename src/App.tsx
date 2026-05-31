@@ -20,6 +20,9 @@ import ProtectedRoute from './components/common/ProtectedRoute'
 import { ChatProvider } from './contexts/ChatContext'
 import socket from './services/socket'
 import ConnectionTest from './components/call/ConnectionTest'
+import VideoCall from './components/call/VideoCall' // ◀️ Altere aqui o import se necessário
+
+
 
 function App() {
   const { isAuthenticated, checkAuth, user, token } = useAuthStore()
@@ -48,7 +51,9 @@ function App() {
             <Route path="/register/step1" element={<RegisterStep1 />} />
             <Route path="/register/step2" element={<RegisterStep2 />} />
             <Route path="/call/:callId" element={<CallView />} />
-            
+            <Route path="/group-call/:chatId" element={<VideoCall />} />
+
+
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Home />}>
                 <Route index element={<Navigate to="/chats" />} />
@@ -61,7 +66,7 @@ function App() {
               </Route>
             </Route>
           </Routes>
-          <Toaster 
+          <Toaster
             position="top-center"
             toastOptions={{
               duration: 3000,
@@ -71,7 +76,7 @@ function App() {
               },
             }}
           />
-         {/* {isAuthenticated && <ConnectionTest />}
+          {/* {isAuthenticated && <ConnectionTest />}
             */}
           {isAuthenticated && user && <CallListener currentUserId={user.id} />}
         </div>

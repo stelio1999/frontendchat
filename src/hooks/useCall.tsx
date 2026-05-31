@@ -119,36 +119,52 @@ export const useCall = () => {
   }, [navigate, incomingCall])
 
   const startCall = async (chatId: string, type: 'voice' | 'video', receiverId: string) => {
-    try {
-      setCallType(type)
-      const response = await api.post('/calls/start', { chatId, type, receiverId })
-      const call = response.data
-      setCurrentCallId(call.id)
-      setIsInCall(true)
-      
-      await webrtcService.startCall(
-        {
-          callerId: call.caller_id,
-          receiverId: receiverId,
+  try {
+    setCallType(type)
+    
+    // 🔥 CORREÇÃO: Caminho absoluto com a barra inicial '/' para evitar rotas relativas fantasmas
+    const response = await api.post('/calls/start', { 
+      chatId, 
+      type, 
+      receiverId 
+    })
+    
+    const call = response.data
+    setCurrentCallId(call.id)
+    setIsInCall(true)
+    
+    await webrtcService.startCall(
+      {
+        // Garante compatibilidade tanto com snake_case (Postgres) quanto camelCase
+        callerId: call.caller_id || call.callerId,
+        receiverId: receiverId,
+        callId: call.id,
+        chatId: chatId,
+        type: type,
+      },
+      (signal) => {
+        socket.emit('call_signal', {
           callId: call.id,
-          chatId: chatId,
-          type: type,
-        },
-        (signal) => {
-          socket.emit('call_signal', {
-            callId: call.id,
-            signal,
-            receiverId: receiverId,
-          })
-        }
-      )
-      navigate(`/call/${call.id}?type=${type}`)
-    } catch (error: any) {
-      console.error('❌ Error starting call:', error)
-      toast.error('Não foi possível iniciar a chamada')
-      setCallType(null)
+          signal,
+          receiverId: receiverId,
+        })
+      }
+    )
+    
+    // Redireciona para a tela de chamada privada clássica
+    navigate(`/call/${call.id}?type=${type}`)
+  } catch (error: any) {
+    console.error('❌ Error starting call:', error)
+    
+    if (error.response) {
+      console.log('Status do Erro:', error.response.status)
+      console.log('Dados devolvidos pelo backend:', error.response.data)
     }
+    
+    toast.error('Não foi possível iniciar a chamada')
+    setCallType(null)
   }
+}
 
   const acceptCall = async (callId: string, callData?: any) => {
     let callInfo = callData || incomingCall

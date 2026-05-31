@@ -1,3 +1,12 @@
+// 🔥 POLYFILL CRÍTICO: Executado antes de qualquer import de módulo para salvar o SimplePeer
+if (typeof window !== 'undefined') {
+  window.process = window.process || {};
+  // Injeta o nextTick que o simple-peer tanto precisa
+  window.process.nextTick = window.process.nextTick || function (fn: Function, ...args: any[]) {
+    setTimeout(() => fn(...args), 0);
+  };
+}
+
 console.log('main')
 import React from 'react'
 import ReactDOM from 'react-dom/client'
@@ -22,7 +31,6 @@ import { Buffer } from 'buffer'
 window.Buffer = Buffer
 
 console.log(APP_CONFIG.googleClientId)
-
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,7 +57,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       </QueryClientProvider>
     </GoogleOAuthProvider>
   </React.StrictMode>
-
-  
 )
-

@@ -3,146 +3,218 @@ import Peer from 'simple-peer'
 import socket from '../services/socket'
 import { useAuthStore } from '../stores/authStore'
 
+interface Participant {
+  id: string
+  name: string
+  stream: MediaStream
+  isLocal: boolean
+}
+
 export const useWebRTC = (roomId: string) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
-  const [peers, setPeers] = useState<Map<string, Peer.Instance>>(new Map())
-  const [isScreenSharing, setIsScreenSharing] = useState(false)
+  const [participants, setParticipants] = useState<Participant[]>([])
   const { user } = useAuthStore()
-  
-  const peerRef = useRef<Peer.Instance | null>(null)
 
-  const initLocalStream = useCallback(async (video = true, audio = true) => {
-    try {
-      const constraints = { video, audio }
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
-      setLocalStream(stream)
-      return stream
-    } catch (error) {
-      console.error('Error accessing media devices:', error)
-      throw error
+  const peersRef = useRef<Map<string, Peer.Instance>>(new Map())
+  const localStreamRef = useRef<MediaStream | null>(null)
+  const isInitialisedRef = useRef<boolean>(false)
+  const isCallingRef = useRef<boolean>(false) // 🔥 Bloqueia execuções simultâneas do startCall
+
+
+  const initLocalStream = useCallback(async () => {
+  if (localStreamRef.current) {
+    return localStreamRef.current
+  }
+
+  // Se já está a inicializar, devolve uma promessa que espera o stream estar pronto
+  if (isInitialisedRef.current) {
+    console.log("⚠️ Inicialização de média já está em curso, aguardando...")
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      if (localStreamRef.current) return localStreamRef.current
     }
-  }, [])
+  }
+
+  // Bloqueio imediato antes do await para evitar condições de corrida assíncronas
+  isInitialisedRef.current = true
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    })
+    
+    localStreamRef.current = stream
+    setLocalStream(stream)
+    
+    setParticipants(prev => {
+      if (prev.some(p => p.isLocal)) return prev
+      return [{ id: user?.id || 'local', name: user?.name || 'Eu', stream, isLocal: true }]
+    })
+
+    return stream
+  } catch (error) {
+    console.error("Erro ao aceder aos dispositivos de média:", error)
+    isInitialisedRef.current = false // Liberta o estado para nova tentativa
+    throw error
+  }
+}, [user])
+
+  const createPeer = useCallback((userToSignal: string, stream: MediaStream) => {
+    const peer = new Peer({
+      initiator: true,
+      trickle: false,
+      stream,
+    })
+
+    peer.on('signal', (signal) => {
+      socket.emit('call_signal', {
+        signal,
+        roomId,
+        targetId: userToSignal,
+        senderId: user?.id,
+        senderName: user?.name
+      })
+    })
+
+    return peer
+  }, [roomId, user])
+
+  const addPeer = useCallback((incomingSignal: Peer.SignalData, callerId: string, stream: MediaStream) => {
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream,
+    })
+
+    peer.on('signal', (signal) => {
+      socket.emit('call_signal', {
+        signal,
+        roomId,
+        targetId: callerId,
+        senderId: user?.id,
+        senderName: user?.name
+      })
+    })
+
+    peer.signal(incomingSignal)
+    return peer
+  }, [roomId, user])
 
   const startCall = useCallback(async () => {
-    const stream = await initLocalStream(true, true)
-    
-    peerRef.current = new Peer({
-      initiator: true,
-      stream,
-      trickle: false,
-    })
+    // 🔥 IMPEDIMENTO: Se já chamou uma vez, cancela a segunda execução concorrente do StrictMode
+    if (isCallingRef.current) return
+    isCallingRef.current = true
 
-    peerRef.current.on('signal', (signal) => {
-      socket.emit('call_signal', { signal, roomId, callerId: user?.id })
-    })
-
-    peerRef.current.on('stream', (stream) => {
-      setRemoteStream(stream)
-    })
-
-    socket.on('call_signal', ({ signal, callerId }) => {
-      if (!peerRef.current) {
-        peerRef.current = new Peer({
-          initiator: false,
-          stream,
-          trickle: false,
-        })
-
-        peerRef.current.on('signal', (signal) => {
-          socket.emit('call_signal', { signal, roomId, callerId: user?.id })
-        })
-
-        peerRef.current.on('stream', (stream) => {
-          setRemoteStream(stream)
-        })
-
-        peerRef.current.signal(signal)
-      } else {
-        peerRef.current.signal(signal)
+    try {
+      const stream = await initLocalStream()
+      if (!stream) {
+        isCallingRef.current = false
+        return
       }
-    })
-  }, [roomId, user, initLocalStream])
+
+      // Limpa listeners antigos para evitar duplicações de eventos na mesma instância de socket
+      socket.off('user_joined')
+      socket.off('call_signal')
+      socket.off('user_left')
+
+      socket.emit('join_call', { callId: roomId, userId: user?.id, userName: user?.name })
+
+      socket.on('user_joined', ({ userId, userName }) => {
+        console.log(`👤 Usuário entrou na sala: ${userName} (${userId})`)
+        
+        if (peersRef.current.has(userId)) return
+
+        const peer = createPeer(userId, stream)
+        peersRef.current.set(userId, peer)
+
+        peer.on('stream', (remoteStream) => {
+          setParticipants(prev => {
+            if (prev.some(p => p.id === userId)) return prev
+            return [...prev, { id: userId, name: userName || 'Participante', stream: remoteStream, isLocal: false }]
+          })
+        })
+      })
+
+      socket.on('call_signal', ({ signal, senderId, senderName, targetId }) => {
+        if (targetId !== user?.id) return
+
+        const peer = peersRef.current.get(senderId)
+        
+        if (peer) {
+          peer.signal(signal)
+        } else {
+          const newPeer = addPeer(signal, senderId, stream)
+          peersRef.current.set(senderId, newPeer)
+
+          newPeer.on('stream', (remoteStream) => {
+            setParticipants(prev => {
+              if (prev.some(p => p.id === senderId)) return prev
+              return [...prev, { id: senderId, name: senderName || 'Participante', stream: remoteStream, isLocal: false }]
+            })
+          })
+        }
+      })
+
+      socket.on('user_left', ({ userId }) => {
+        console.log(`❌ Usuário saiu: ${userId}`)
+        const peer = peersRef.current.get(userId)
+        if (peer) {
+          peer.destroy()
+          peersRef.current.delete(userId)
+        }
+        setParticipants(prev => prev.filter(p => p.id !== userId))
+      })
+
+    } catch (err) {
+      isCallingRef.current = false
+      console.error("Falha ao iniciar a chamada WebRTC:", err)
+    }
+  }, [roomId, user, initLocalStream, createPeer, addPeer])
 
   const endCall = useCallback(() => {
-    if (peerRef.current) {
-      peerRef.current.destroy()
-      peerRef.current = null
-    }
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop())
-      setLocalStream(null)
-    }
-    setRemoteStream(null)
-    socket.emit('end_call', { roomId })
-  }, [localStream, roomId])
+    socket.emit('leave_call', roomId) 
+    
+    peersRef.current.forEach(peer => peer.destroy())
+    peersRef.current.clear()
 
-  const toggleScreenShare = useCallback(async () => {
-    if (!isScreenSharing) {
-      try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
-        const videoTrack = screenStream.getVideoTracks()[0]
-        const sender = peerRef.current?._pc.getSenders().find(s => s.track?.kind === 'video')
-        if (sender) {
-          sender.replaceTrack(videoTrack)
-        }
-        videoTrack.onended = () => {
-          if (localStream) {
-            const originalVideoTrack = localStream.getVideoTracks()[0]
-            sender?.replaceTrack(originalVideoTrack)
-          }
-          setIsScreenSharing(false)
-        }
-        setIsScreenSharing(true)
-      } catch (error) {
-        console.error('Error sharing screen:', error)
-      }
-    } else {
-      if (localStream) {
-        const videoTrack = localStream.getVideoTracks()[0]
-        const sender = peerRef.current?._pc.getSenders().find(s => s.track?.kind === 'video')
-        if (sender) {
-          sender.replaceTrack(videoTrack)
-        }
-      }
-      setIsScreenSharing(false)
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop())
+      localStreamRef.current = null
     }
-  }, [isScreenSharing, localStream])
 
-  const toggleAudio = useCallback(() => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0]
-      audioTrack.enabled = !audioTrack.enabled
-    }
-  }, [localStream])
+    setLocalStream(null)
+    setParticipants([])
+    isCallingRef.current = false
+    isInitialisedRef.current = false
+    
+    socket.off('user_joined')
+    socket.off('call_signal')
+    socket.off('user_left')
+  }, [roomId])
 
-  const toggleVideo = useCallback(() => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0]
-      videoTrack.enabled = !videoTrack.enabled
-    }
-  }, [localStream])
-
+  // Limpeza robusta ao desmontar o hook
   useEffect(() => {
-    socket.on('user_left', () => {
-      endCall()
-    })
-
     return () => {
-      endCall()
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop())
+        localStreamRef.current = null
+      }
+      peersRef.current.forEach(peer => peer.destroy())
+      peersRef.current.clear()
+      isCallingRef.current = false
+      isInitialisedRef.current = false
+
+      socket.off('user_joined')
       socket.off('call_signal')
       socket.off('user_left')
     }
-  }, [endCall])
+  }, [])
 
   return {
     localStream,
-    remoteStream,
+    participants,
     startCall,
     endCall,
-    toggleScreenShare,
-    toggleAudio,
-    toggleVideo,
-    isScreenSharing,
   }
 }
