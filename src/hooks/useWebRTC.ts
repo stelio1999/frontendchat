@@ -200,8 +200,6 @@ export const useWebRTC = (roomId: string) => {
     }
   }, [roomId, user, initLocalStream, createPeer, addPeer])
 
-
-  
   const endCall = useCallback(() => {
     socket.emit('leave_call', roomId) 
     

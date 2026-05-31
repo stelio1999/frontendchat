@@ -14,7 +14,7 @@ import api from '../../services/api'
 import socket from '../../services/socket' // ◀️ Certifica-te de que o socket está importado aqui
 import { usePresenceStore } from '../../stores/PresenceStore'
 import { useCall } from '../../hooks/useCall'
-
+import axios from 'axios' // ◀️ ADICIONA ESTA LINHA AQUI NO TOPO!
 interface ChatHeaderProps {
   chat: Chat
   onClose?: () => void
@@ -103,11 +103,15 @@ export default function ChatHeader({ chat, onClose }: ChatHeaderProps) {
   
   try {
     // 1. 🔥 Enviamos exatamente o que a validação do teu Backend exige para não dar 400
-    const response = await api.post('/calls/start', { 
-      chatId: chat.id, 
-      type: callTypeForGroup, 
-      receiverId: firstParticipantId // Mantido para passar no validador do Express
-    })
+    // No ChatHeader.tsx, altera temporariamente para testar:
+// No ChatHeader.tsx, substitui o axios.post temporário por este:
+// No ChatHeader.tsx -> Dentro de startGroupCall()
+const response = await api.post('/calls/start', { 
+  chatId: chat.id, 
+  type: callTypeForGroup, 
+  receiverId: firstParticipantId 
+})
+
     
     const call = response.data
     
