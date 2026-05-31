@@ -1,6 +1,6 @@
 import React from 'react'
 import { User } from '../../types/user.types'
-import { usePresenceStore } from '../../stores/presenceStore'
+import { usePresenceStore } from '../../stores/PresenceStore'
 
 interface AvatarProps {
   user?: User

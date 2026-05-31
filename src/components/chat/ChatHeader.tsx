@@ -10,7 +10,7 @@ import GroupInfo from '../group/GroupInfo'
 import Modal from '../common/Modal'
 import { toast } from 'react-hot-toast'
 import api from '../../services/api'
-import { usePresenceStore } from '../../stores/presenceStore'
+import { usePresenceStore } from '../../stores/PresenceStore'
 import { useCall } from '../../hooks/useCall'
 
 

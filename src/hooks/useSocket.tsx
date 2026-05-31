@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import socket from '../services/socket'
 import { useAuthStore } from '../stores/authStore'
-import { usePresenceStore } from '../stores/presenceStore'
+import { usePresenceStore } from '../stores/PresenceStore'
 
 export const useSocket = () => {
   const [isConnected, setIsConnected] = useState(false)

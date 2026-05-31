@@ -3,7 +3,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { pt } from 'date-fns/locale'
 import Avatar from '../common/Avatar'
 import { Chat } from '../../types/chat.types'
-import { usePresenceStore } from '../../stores/presenceStore'
+import { usePresenceStore } from '../../stores/PresenceStore'
 
 
 
