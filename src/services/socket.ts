@@ -132,6 +132,24 @@ class SocketService {
       this.notifyHandlers('chat_read', data)
     })
 
+    // DENTRO DO MÉTODO connect() DO SocketService.ts, junta isto:
+
+// WebRTC Meeting Events
+this.socket.on('room_users', (data) => {
+  console.log('🎯 room_users interceptado pelo Service:', data)
+  this.notifyHandlers('room_users', data)
+})
+
+this.socket.on('user_joined', (data) => {
+  console.log('🎯 user_joined interceptado pelo Service:', data)
+  this.notifyHandlers('user_joined', data)
+})
+
+this.socket.on('user_left', (data) => {
+  console.log('🎯 user_left interceptado pelo Service:', data)
+  this.notifyHandlers('user_left', data)
+})
+
     // Make socket globally available for debugging
     ;(window as any).socket = this.socket
     ;(window as any).socketService = this

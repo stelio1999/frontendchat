@@ -101,6 +101,19 @@ export const useWebRTC = (roomId: string) => {
     return peer
   }, [roomId, user])
 
+// Função auxiliar interna para isolar a atualização de participantes remotos e evitar código duplicado
+  const handleRemoteStream = useCallback((remoteUserId: string, remoteUserName: string, remoteStream: MediaStream) => {
+    setParticipants(prev => {
+      if (prev.some(p => p.id === remoteUserId)) return prev
+      return [...prev, { 
+        id: remoteUserId, 
+        name: remoteUserName || 'Participante', 
+        stream: remoteStream, 
+        isLocal: false 
+      }]
+    })
+  }, [])
+
   const startCall = useCallback(async () => {
     if (isCallingRef.current) return
     isCallingRef.current = true
@@ -112,78 +125,59 @@ export const useWebRTC = (roomId: string) => {
         return
       }
 
-      // 1. Limpar rigorosamente antes de registrar novos para evitar leaks de memória
+      // 1. Limpar rigorosamente usando os métodos do teu SocketService
       socket.off('user_joined')
       socket.off('call_signal')
       socket.off('user_left')
-      socket.off('room_users') // Novo listener
+      socket.off('room_users')
 
-      // 2. Emitir entrada na sala
+      // 2. Emitir entrada na sala de reunião
       socket.emit('join_call', { callId: roomId, userId: user?.id, userName: user?.name })
 
-      // [CORREÇÃO] 3. Ouvir quem JÁ ESTAVA na sala antes de mim entrar
+      // 3. Ouvir quem JÁ ESTAVA na sala (Eu tomo a iniciativa de ligar para eles)
       socket.on('room_users', (usersInRoom: { userId: string, userName: string }[]) => {
         console.log("👥 Utilizadores já presentes na sala:", usersInRoom)
         
         usersInRoom.forEach(({ userId, userName }) => {
           if (userId === user?.id || peersRef.current.has(userId)) return
 
-          // Eu sou o iniciador para quem já lá estava
+          console.log(`🚀 A iniciar conexão ativa com veterano: ${userName}`)
           const peer = createPeer(userId, stream)
           peersRef.current.set(userId, peer)
 
-          peer.on('stream', (remoteStream) => {
-            setParticipants(prev => {
-              if (prev.some(p => p.id === userId)) return prev
-              return [...prev, { id: userId, name: userName || 'Participante', stream: remoteStream, isLocal: false }]
-            })
-          })
+          peer.on('stream', (remoteStream) => handleRemoteStream(userId, userName, remoteStream))
         })
       })
 
-      // 4. Ouvir quem entra DEPOIS de mim
+      // 4. Ouvir quem entra DEPOIS de mim (Novatos)
       socket.on('user_joined', ({ userId, userName }) => {
         console.log(`👤 Novo usuário entrou na sala: ${userName} (${userId})`)
-        
         if (userId === user?.id || peersRef.current.has(userId)) return
 
-        // Quem entra depois cria o Peer como false (não iniciador) ou aguarda o sinal.
-        // Na arquitetura clássica do simple-peer, quem está na sala cria o Peer (Iniciador) ao detetar o novo.
-        const peer = createPeer(userId, stream)
-        peersRef.current.set(userId, peer)
-
-        peer.on('stream', (remoteStream) => {
-          setParticipants(prev => {
-            if (prev.some(p => p.id === userId)) return prev
-            return [...prev, { id: userId, name: userName || 'Participante', stream: remoteStream, isLocal: false }]
-          })
-        })
+        // Aguardamos que o novato monte o peer dele (initiator: true) ao ler o 'room_users' no lado dele
+        console.log(`⏳ A aguardar sinal de oferta SDP do novato: ${userName}`)
       })
 
-      // 5. Tratar troca de Sinais SDP / ICE Candidates
+      // 5. Orquestração de Sinais SDP / ICE Candidates
       socket.on('call_signal', ({ signal, senderId, senderName, targetId }) => {
         if (targetId !== user?.id) return
-        console.log(`📡 Sinal recebido de: ${senderName}`)
+        console.log(`📡 Sinal recebido de: ${senderName} (Tipo: ${signal.type || 'Candidate'})`)
 
         const peer = peersRef.current.get(senderId)
         
         if (peer) {
           peer.signal(signal)
         } else {
-          // Se o peer não existe, criamos como RESPONDENTE (initiator: false)
+          // Se o peer não existe, fomos interpelados por uma oferta de um novato. Agimos como respondentes.
+          console.log(`➕ A criar peer passivo (respondente) para: ${senderName}`)
           const newPeer = addPeer(signal, senderId, stream)
           peersRef.current.set(senderId, newPeer)
 
-          newPeer.on('stream', (remoteStream) => {
-            setParticipants(prev => {
-              if (prev.some(p => p.id === senderId)) return prev
-              return [...prev, { id: senderId, name: senderName || 'Participante', stream: remoteStream, isLocal: false }]
-            })
-          })
+          newPeer.on('stream', (remoteStream) => handleRemoteStream(senderId, senderName, remoteStream))
         }
       })
 
-      // 6. Tratar saídas
+      // 6. Tratar saídas abruptas ou normais da sala
       socket.on('user_left', ({ userId }) => {
         console.log(`❌ Usuário saiu: ${userId}`)
         const peer = peersRef.current.get(userId)
@@ -198,29 +192,34 @@ export const useWebRTC = (roomId: string) => {
       isCallingRef.current = false
       console.error("Falha ao iniciar a chamada WebRTC:", err)
     }
-  }, [roomId, user, initLocalStream, createPeer, addPeer])
+  }, [roomId, user, initLocalStream, createPeer, addPeer, handleRemoteStream])
 
   const endCall = useCallback(() => {
+    // 1. Avisar o backend que estamos a abandonar o barco
     socket.emit('leave_call', roomId) 
     
+    // 2. Destruir e limpar todas as conexões peer ativas de forma limpa
     peersRef.current.forEach(peer => peer.destroy())
     peersRef.current.clear()
 
+    // 3. Desligar a câmara e microfone locais cortando as tracks de hardware
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop())
       localStreamRef.current = null
     }
 
+    // 4. Resetar estados reativos
     setLocalStream(null)
     setParticipants([])
     isCallingRef.current = false
     isInitialisedRef.current = false
     
+    // 5. Desvincular listeners do SocketService para evitar processamento em background residual
+    socket.off('room_users')
     socket.off('user_joined')
     socket.off('call_signal')
     socket.off('user_left')
   }, [roomId])
-
   // Limpeza robusta ao desmontar o hook
   useEffect(() => {
     return () => {
