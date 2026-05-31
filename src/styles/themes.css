@@ -1,0 +1,29 @@
+/* Temas claro e escuro */
+.light {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f0f2f5;
+  --bg-chat: #efeae2;
+  --text-primary: #111b21;
+  --text-secondary: #667781;
+  --border-color: #e9edef;
+}
+
+.dark {
+  --bg-primary: #111b21;
+  --bg-secondary: #0c1317;
+  --bg-chat: #0a1014;
+  --text-primary: #e9edef;
+  --text-secondary: #8696a0;
+  --border-color: #222d34;
+}
+
+/* Aplicação das cores */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Transições suaves */
+.theme-transition {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}

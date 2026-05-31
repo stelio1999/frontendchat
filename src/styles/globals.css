@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply m-0 p-0 box-border;
+  }
+
+  body {
+    @apply font-sans antialiased overflow-hidden;
+  }
+
+  /* Scrollbar personalizada */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 dark:bg-gray-600 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500 dark:bg-gray-500;
+  }
+}
+
+@layer components {
+  /* Skeleton Loading */
+  .skeleton {
+    @apply animate-skeleton bg-gray-200 dark:bg-gray-700 rounded;
+  }
+
+  /* Blur effects */
+  .blur-bg {
+    @apply backdrop-blur-md bg-white/30 dark:bg-black/30;
+  }
+
+  /* Chat bubbles */
+  .message-bubble-sent {
+    @apply bg-whatsapp-green text-white rounded-l-2xl rounded-br-2xl;
+  }
+
+  .message-bubble-received {
+    @apply bg-white dark:bg-whatsapp-input-dark text-gray-900 dark:text-white rounded-r-2xl rounded-bl-2xl;
+  }
+
+  /* Online status */
+  .online-indicator {
+    @apply absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Garantir que elementos clicáveis tenham cursor pointer */
+.cursor-pointer {
+  cursor: pointer;
+}
+
+[role="button"],
+button,
+a {
+  cursor: pointer;
+}
+
+/* Debug para verificar elementos clicáveis */
+.debug-clickable [role="button"] {
+  outline: 1px solid red;
+}
