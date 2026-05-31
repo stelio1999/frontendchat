@@ -102,7 +102,6 @@ export const useWebRTC = (roomId: string) => {
   }, [roomId, user])
 
   const startCall = useCallback(async () => {
-    // 🔥 IMPEDIMENTO: Se já chamou uma vez, cancela a segunda execução concorrente do StrictMode
     if (isCallingRef.current) return
     isCallingRef.current = true
 
@@ -113,18 +112,43 @@ export const useWebRTC = (roomId: string) => {
         return
       }
 
-      // Limpa listeners antigos para evitar duplicações de eventos na mesma instância de socket
+      // 1. Limpar rigorosamente antes de registrar novos para evitar leaks de memória
       socket.off('user_joined')
       socket.off('call_signal')
       socket.off('user_left')
+      socket.off('room_users') // Novo listener
 
+      // 2. Emitir entrada na sala
       socket.emit('join_call', { callId: roomId, userId: user?.id, userName: user?.name })
 
-      socket.on('user_joined', ({ userId, userName }) => {
-        console.log(`👤 Usuário entrou na sala: ${userName} (${userId})`)
+      // [CORREÇÃO] 3. Ouvir quem JÁ ESTAVA na sala antes de mim entrar
+      socket.on('room_users', (usersInRoom: { userId: string, userName: string }[]) => {
+        console.log("👥 Utilizadores já presentes na sala:", usersInRoom)
         
-        if (peersRef.current.has(userId)) return
+        usersInRoom.forEach(({ userId, userName }) => {
+          if (userId === user?.id || peersRef.current.has(userId)) return
 
+          // Eu sou o iniciador para quem já lá estava
+          const peer = createPeer(userId, stream)
+          peersRef.current.set(userId, peer)
+
+          peer.on('stream', (remoteStream) => {
+            setParticipants(prev => {
+              if (prev.some(p => p.id === userId)) return prev
+              return [...prev, { id: userId, name: userName || 'Participante', stream: remoteStream, isLocal: false }]
+            })
+          })
+        })
+      })
+
+      // 4. Ouvir quem entra DEPOIS de mim
+      socket.on('user_joined', ({ userId, userName }) => {
+        console.log(`👤 Novo usuário entrou na sala: ${userName} (${userId})`)
+        
+        if (userId === user?.id || peersRef.current.has(userId)) return
+
+        // Quem entra depois cria o Peer como false (não iniciador) ou aguarda o sinal.
+        // Na arquitetura clássica do simple-peer, quem está na sala cria o Peer (Iniciador) ao detetar o novo.
         const peer = createPeer(userId, stream)
         peersRef.current.set(userId, peer)
 
@@ -136,14 +160,17 @@ export const useWebRTC = (roomId: string) => {
         })
       })
 
+      // 5. Tratar troca de Sinais SDP / ICE Candidates
       socket.on('call_signal', ({ signal, senderId, senderName, targetId }) => {
         if (targetId !== user?.id) return
+        console.log(`📡 Sinal recebido de: ${senderName}`)
 
         const peer = peersRef.current.get(senderId)
         
         if (peer) {
           peer.signal(signal)
         } else {
+          // Se o peer não existe, criamos como RESPONDENTE (initiator: false)
           const newPeer = addPeer(signal, senderId, stream)
           peersRef.current.set(senderId, newPeer)
 
@@ -156,6 +183,7 @@ export const useWebRTC = (roomId: string) => {
         }
       })
 
+      // 6. Tratar saídas
       socket.on('user_left', ({ userId }) => {
         console.log(`❌ Usuário saiu: ${userId}`)
         const peer = peersRef.current.get(userId)
@@ -172,6 +200,8 @@ export const useWebRTC = (roomId: string) => {
     }
   }, [roomId, user, initLocalStream, createPeer, addPeer])
 
+
+  
   const endCall = useCallback(() => {
     socket.emit('leave_call', roomId) 
     
