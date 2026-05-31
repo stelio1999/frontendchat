@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import socket from '../services/socket'
 import api from '../services/api'
@@ -10,9 +10,24 @@ export const useCall = () => {
   const [callType, setCallType] = useState<'voice' | 'video' | null>(null)
   const [currentCallId, setCurrentCallId] = useState<string | null>(null)
   const [incomingCall, setIncomingCall] = useState<any>(null)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null) // ◀️ Estado reativo real
   const navigate = useNavigate()
 
-  // Setup socket listeners
+  useEffect(() => {
+    // ◀️ Escuta o evento de stream vindo do WebRTCService
+    const handleRemoteStream = (data: { userId: string, stream: MediaStream }) => {
+      console.log('⚡ Hook useCall capturou stream remoto:', data.stream.id)
+      setRemoteStream(data.stream)
+    }
+
+    webrtcService.on('remote_stream', handleRemoteStream)
+    
+    // Cleanup do listener do serviço
+    return () => {
+      webrtcService.off('remote_stream', handleRemoteStream)
+    }
+  }, [])
+
   useEffect(() => {
     console.log('Setting up call event listeners...')
     
@@ -20,7 +35,6 @@ export const useCall = () => {
       console.log('🔔 INCOMING CALL RECEIVED:', data)
       setIncomingCall(data)
       
-      // Show toast notification
       toast.custom((t) => (
         <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-4 md:bottom-4 md:w-96 z-50 animate-slide-in-up">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
@@ -62,6 +76,7 @@ export const useCall = () => {
     const handleCallAccepted = (data: any) => {
       console.log('✅ CALL ACCEPTED:', data)
       toast.success('Chamada conectada!')
+      setIsInCall(true)
     }
 
     const handleCallRejected = (data: any) => {
@@ -75,16 +90,19 @@ export const useCall = () => {
       toast.info('Chamada encerrada')
       setIsInCall(false)
       setCurrentCallId(null)
+      setRemoteStream(null)
       webrtcService.endCall()
       navigate(-1)
     }
 
-    const handleCallSignal = async ({ signal, callerId }: any) => {
-      console.log('📡 CALL SIGNAL received from:', callerId)
-      webrtcService.handleSignal(callerId, signal)
+    const handleCallSignal = async ({ signal, callerId, senderId, from }: any) => {
+      const originUser = callerId || senderId || from;
+      console.log('📡 CALL SIGNAL recebido do ID:', originUser)
+      if (originUser) {
+        webrtcService.handleSignal(originUser, signal)
+      }
     }
 
-    // Register all event listeners
     socket.on('incoming_call', handleIncomingCall)
     socket.on('call_accepted', handleCallAccepted)
     socket.on('call_rejected', handleCallRejected)
@@ -98,127 +116,85 @@ export const useCall = () => {
       socket.off('call_ended', handleCallEnded)
       socket.off('call_signal', handleCallSignal)
     }
-  }, [navigate])
+  }, [navigate, incomingCall])
 
   const startCall = async (chatId: string, type: 'voice' | 'video', receiverId: string) => {
-  try {
-    console.log('Starting call:', { chatId, type, receiverId })
-    
-    // Set type immediately for UI
-    setCallType(type)
-    
-    const response = await api.post('/calls/start', {
-      chatId,
-      type,
-      receiverId,
-    })
-    
-    const call = response.data
-    console.log('Call created:', call)
-    
-    setCurrentCallId(call.id)
-    
-    // Setup WebRTC
-    await webrtcService.startCall(
-      {
-        callerId: call.caller_id,
-        receiverId: receiverId,
-        callId: call.id,
-        chatId: chatId,
-        type: type,
-      },
-      (signal) => {
-        socket.emit('call_signal', {
-          callId: call.id,
-          signal,
+    try {
+      setCallType(type)
+      const response = await api.post('/calls/start', { chatId, type, receiverId })
+      const call = response.data
+      setCurrentCallId(call.id)
+      setIsInCall(true)
+      
+      await webrtcService.startCall(
+        {
+          callerId: call.caller_id,
           receiverId: receiverId,
-        })
-      }
-    )
-    
-    // Navigate with type in URL
-    navigate(`/call/${call.id}?type=${type}`)
-    
-  } catch (error: any) {
-    console.error('Error starting call:', error)
-    toast.error(error.response?.data?.error || 'Não foi possível iniciar a chamada')
-    setCallType(null)
+          callId: call.id,
+          chatId: chatId,
+          type: type,
+        },
+        (signal) => {
+          socket.emit('call_signal', {
+            callId: call.id,
+            signal,
+            receiverId: receiverId,
+          })
+        }
+      )
+      navigate(`/call/${call.id}?type=${type}`)
+    } catch (error: any) {
+      console.error('❌ Error starting call:', error)
+      toast.error('Não foi possível iniciar a chamada')
+      setCallType(null)
+    }
   }
-}
 
- const acceptCall = async (callId: string, callData?: any) => {
-  console.log('✅ Accepting call:', callId)
-  console.log('Call data received:', callData)
-  
-  let callInfo = callData
-  if (!callInfo) {
-    callInfo = incomingCall
-    console.log('Using incomingCall from state:', callInfo)
-  }
-  
-  if (!callInfo) {
-    console.error('No call data available to accept call')
-    toast.error('Erro ao aceitar chamada: dados não disponíveis')
-    return
-  }
-  
-  if (!callInfo.type) {
-    console.error('Call data missing type property:', callInfo)
-    toast.error('Erro ao aceitar chamada: tipo não especificado')
-    return
-  }
-  
-  // Set the call type before navigating
-  setCallType(callInfo.type)
-  setCurrentCallId(callId)
-  setIsInCall(true)
-  
-  console.log('Setting call type to:', callInfo.type)
-  
-  try {
-    // Accept call on backend
-    await api.post(`/calls/${callId}/accept`)
+  const acceptCall = async (callId: string, callData?: any) => {
+    let callInfo = callData || incomingCall
+    if (!callInfo) return
+
+    setCallType(callInfo.type)
+    setCurrentCallId(callId)
+    setIsInCall(true)
     
-    // Setup WebRTC to answer
-    await webrtcService.answerCall(
-      {
-        callerId: callInfo.callerId,
-        receiverId: callInfo.receiverId || (window as any).currentUserId,
-        callId: callId,
-        chatId: callInfo.chatId,
-        type: callInfo.type,
-      },
-      (signal) => {
-        socket.emit('call_signal', {
+    try {
+      await api.post(`/calls/${callId}/accept`)
+      
+      const targetUserId = callInfo.callerId || callInfo.caller_id;
+
+      await webrtcService.answerCall(
+        {
+          callerId: targetUserId,
+          receiverId: callInfo.receiverId || (window as any).currentUserId || '',
           callId: callId,
-          signal,
-          receiverId: callInfo.callerId,
-        })
-      }
-    )
-    
-    // Navigate to call view with type in URL
-    navigate(`/call/${callId}?type=${callInfo.type}`)
-    
-    toast.dismiss(`call-${callId}`)
-    setIncomingCall(null)
-    
-  } catch (error) {
-    console.error('Error accepting call:', error)
-    toast.error('Não foi possível aceitar a chamada')
-    setCallType(null)
-    setIsInCall(false)
+          chatId: callInfo.chatId,
+          type: callInfo.type,
+        },
+        (signal) => {
+          socket.emit('call_signal', {
+            callId: callId,
+            signal,
+            receiverId: targetUserId,
+          })
+        }
+      )
+      
+      navigate(`/call/${callId}?type=${callInfo.type}`)
+      toast.dismiss(`call-${callId}`)
+      setIncomingCall(null)
+    } catch (error) {
+      console.error('Error accepting call:', error)
+      setCallType(null)
+      setIsInCall(false)
+    }
   }
-}
 
   const rejectCall = async (callId: string) => {
-    console.log('❌ Rejecting call:', callId)
-    
     try {
       await api.post(`/calls/${callId}/reject`)
       socket.emit('call_rejected', { callId })
       toast.dismiss(`call-${callId}`)
-      toast.success('Chamada recusada')
       setIncomingCall(null)
     } catch (error) {
       console.error('Error rejecting call:', error)
@@ -228,48 +204,27 @@ export const useCall = () => {
   const endCall = async () => {
     if (currentCallId) {
       try {
-        await api.post(`/calls/${currentCallId}/end`, {
-          duration: 0,
-        })
-      } catch (error) {
-        console.error('Error ending call:', error)
-      }
+        await api.post(`/calls/${currentCallId}/end`, { duration: 0 })
+      } catch (error) { console.error(error) }
     }
-    
     webrtcService.endCall()
+    setRemoteStream(null)
     setIsInCall(false)
     setCurrentCallId(null)
   }
-
-  const toggleMute = () => {
-    const isMuted = webrtcService.toggleMicrophone()
-    return isMuted
-  }
-
-  const toggleVideo = () => {
-    const isVideoOn = webrtcService.toggleCamera()
-    return isVideoOn
-  }
-
-  const shareScreen = async () => {
-    await webrtcService.shareScreen()
-  }
-
-  const getLocalStream = () => webrtcService.getLocalStream()
-  const getRemoteStream = () => webrtcService.getRemoteStream('')
 
   return {
     isInCall,
     callType,
     incomingCall,
+    remoteStream, // ◀️ Exposto diretamente para a View saber quando renderizar
     startCall,
     acceptCall,
     rejectCall,
     endCall,
-    toggleMute,
-    toggleVideo,
-    shareScreen,
-    getLocalStream,
-    getRemoteStream,
+    toggleMute: () => webrtcService.toggleMicrophone(),
+    toggleVideo: () => webrtcService.toggleCamera(),
+    shareScreen: () => webrtcService.shareScreen(),
+    getLocalStream: () => webrtcService.getLocalStream(),
   }
 }

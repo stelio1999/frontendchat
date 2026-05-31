@@ -19,6 +19,7 @@ import CallListener from './components/call/CallListener'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import { ChatProvider } from './contexts/ChatContext'
 import socket from './services/socket'
+import ConnectionTest from './components/call/ConnectionTest'
 
 function App() {
   const { isAuthenticated, checkAuth, user, token } = useAuthStore()
@@ -70,6 +71,8 @@ function App() {
               },
             }}
           />
+         {/* {isAuthenticated && <ConnectionTest />}
+            */}
           {isAuthenticated && user && <CallListener currentUserId={user.id} />}
         </div>
       </ChatProvider>
