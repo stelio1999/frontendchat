@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Users, Maximize2, Minimize2 } from 'lucide-react'
 import { useWebRTC } from '../../hooks/useWebRTC'
 import CallControls from './CallControls'
-import ScreenShare from './ScreenShare'
+import api from '../../services/api' // ◀️ Importa a tua instância configurada do Axios
+import toast from 'react-hot-toast'
 
 interface Participant {
   id: string
@@ -22,31 +23,134 @@ export default function VideoCall() {
   const [isScreenSharing, setIsScreenSharing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   
-  // 🔥 Lemos diretamente a lista real de participantes gerenciada pelo hook
-  // Dentro do seu componente VideoCall()
+  const { localStream, participants, startCall, endCall } = useWebRTC(chatId!)
+  const hasStartedCall = useRef(false)
 
-// Dentro do seu componente VideoCall()
+  // 🎙️ REFERÊNCIAS PARA A GRAVAÇÃO DO ÁUDIO DA REUNIÃO
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const mixStreamRef = useRef<MediaStream | null>(null)
 
-const { localStream, participants, startCall, endCall } = useWebRTC(chatId!)
-const hasStartedCall = useRef(false)
+  useEffect(() => {
+    if (hasStartedCall.current) return
+    hasStartedCall.current = true
 
-useEffect(() => {
-  if (hasStartedCall.current) return
-  hasStartedCall.current = true
+    startCall()
 
-  startCall()
+    return () => {
+      // Executa ao desmontar o componente de forma segura
+      handleFinalizeRecording()
+      endCall()
+      setTimeout(() => {
+        hasStartedCall.current = false
+      }, 100)
+    }
+  }, [startCall, endCall])
 
-  return () => {
-    endCall()
-    // Pequeno atraso na libertação da flag para mitigar a velocidade do StrictMode do React
-    setTimeout(() => {
-      hasStartedCall.current = false
-    }, 100)
+  // 🎙️ INICIAR GRAVAÇÃO MISTURANDO AS FAIXAS DE ÁUDIO DISPONÍVEIS
+  // 🎙️ INICIAR GRAVAÇÃO MISTURANDO APENAS AS FAIXAS DE ÁUDIO REAIS
+ // 🎙️ INICIAR GRAVAÇÃO UTILIZANDO WEB AUDIO API (MIXAGEM REAL DE HARDWARE)
+  useEffect(() => {
+    if (localStream && !mediaRecorderRef.current) {
+      try {
+        // 1. Inicializa o contexto de áudio do navegador
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+        const audioContext = new AudioContextClass()
+        
+        // 2. Cria o nó de destino (onde vamos capturar o som unificado)
+        const dest = audioContext.createMediaStreamDestination()
+        let hasTracks = false
+
+        // 3. Injeta o áudio local (Microfone) no misturador
+        if (localStream.getAudioTracks().length > 0) {
+          const localSource = audioContext.createMediaStreamSource(localStream)
+          localSource.connect(dest)
+          hasTracks = true
+        }
+
+        // 4. Injeta o áudio de todos os participantes remotos ativos no misturador
+        participants.forEach(p => {
+          if (p.stream && p.stream.getAudioTracks().length > 0) {
+            try {
+              const remoteSource = audioContext.createMediaStreamSource(p.stream)
+              remoteSource.connect(dest)
+              hasTracks = true
+            } catch (e) {
+              console.warn(`Não foi possível acoplar áudio do participante ${p.name}:`, e)
+            }
+          }
+        })
+
+        // Se nenhuma faixa de áudio real pôde ser acoplada, aborta para não gerar arquivo vazio
+        if (!hasTracks) return
+
+        // 5. O MediaRecorder grava a stream unificada e perfeitamente sincronizada pelo browser
+        const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' })
+        audioChunksRef.current = []
+
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            audioChunksRef.current.push(event.data)
+          }
+        }
+
+        recorder.onstop = async () => {
+          // Fecha o contexto de áudio para libertar os recursos de hardware do PC
+          audioContext.close()
+          await uploadMeetingAudio()
+        }
+
+        recorder.start(1000) // Grava em blocos de 1 segundo
+        mediaRecorderRef.current = recorder
+        mixStreamRef.current = dest.stream
+        
+        console.log("✅ [Web Audio API] Misturador de canais ativo. Gravação sincronizada iniciada.")
+      } catch (err) {
+        console.error("Erro ao inicializar o misturador de áudio:", err)
+      }
+    }
+  }, [localStream, participants])
+
+  // 📤 ENVIO DO FICHEIRO CORRIGIDO PARA O BACKEND
+  const uploadMeetingAudio = async () => {
+    // Garante que o blob final mantém explicitamente o tipo do codec correto
+    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' })
+    
+    // 🔥 Proteção fundamental: se a reunião durou milissegundos ou o arquivo for minúsculo, aborta
+    if (audioBlob.size < 4000) {
+      console.warn("⚠️ Gravação muito curta ou sem dados suficientes. Abortando upload.")
+      return 
+    }
+
+    const today = new Date()
+    const formattedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+    const formData = new FormData()
+    // Forçamos a extensão .webm explicitamente
+    formData.append('audio', audioBlob, 'reuniao.webm')
+    formData.append('roomId', 'geral')
+    formData.append('date', formattedDate)
+
+    try {
+      console.log("📤 Enviando áudio estruturado para o backend...")
+      await api.post('/calls/process-audio', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      console.log("✅ Áudio processado e transcrito com sucesso!")
+    } catch (error) {
+      console.error("❌ Erro ao enviar áudio final:", error)
+    }
   }
-}, [startCall, endCall]) // Podes manter as dependências estáveis geradas pelo useCallback
 
-  
-  // Apelido simples para manter compatibilidade com o resto do teu layout JSX abaixo
+  const handleFinalizeRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    if (mixStreamRef.current) {
+      mixStreamRef.current.getTracks().forEach(track => track.stop())
+    }
+  }
+
   const streamsList = participants
 
   const toggleMute = () => {
@@ -66,8 +170,23 @@ useEffect(() => {
   }
 
   const handleEndCall = () => {
+    console.log("🛑 Encerrando chamada e processando gravação...")
+    
+    // 1. Para o gravador (isto dispara o recorder.onstop e consequentemente o uploadMeetingAudio)
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    if (mixStreamRef.current) {
+      mixStreamRef.current.getTracks().forEach(track => track.stop())
+    }
+
+    // 2. Executa a limpeza do WebRTC
     endCall()
-    navigate(-1)
+
+    // 3. Dá um pequeno delay de 500ms para o Axios iniciar o upload antes de desparar a navegação de ecrã
+    setTimeout(() => {
+      navigate(-1)
+    }, 500)
   }
 
   return (
@@ -89,10 +208,8 @@ useEffect(() => {
         )}
       </div>
 
-      {/* Conteúdo Principal Dividido entre os Vídeos e a Lista Nominal */}
+      {/* Conteúdo Principal */}
       <div className="flex-1 flex min-h-0 relative">
-        
-        {/* LADO ESQUERDO: Área Principal de Streams (Vídeos) */}
         <div className="flex-1 p-4 relative flex items-center justify-center min-h-0">
           <AnimatePresence mode="wait">
             {expandedId ? (
@@ -150,17 +267,14 @@ useEffect(() => {
           </AnimatePresence>
         </div>
 
-        {/* LADO DIREITO: LISTA NOMINAL DOS PARTICIPANTES */}
+        {/* Lista Nominal Lateral */}
         <div className="w-64 bg-gray-900/40 backdrop-blur border-l border-gray-800 flex flex-col p-4">
           <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2 uppercase tracking-wider">
             <Users size={14} /> Participantes ({streamsList.length})
           </h3>
           <div className="flex-1 overflow-y-auto flex flex-col gap-2">
             {streamsList.map((p) => (
-              <div 
-                key={p.id} 
-                className="flex items-center justify-between p-2.5 rounded-xl bg-gray-900/80 border border-gray-800/60"
-              >
+              <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-gray-900/80 border border-gray-800/60">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className={`w-2 h-2 rounded-full ${p.isLocal ? 'bg-whatsapp-green' : 'bg-blue-400'} shrink-0`} />
                   <p className="text-sm font-medium truncate text-gray-200">{p.name}</p>
@@ -172,10 +286,9 @@ useEffect(() => {
             ))}
           </div>
         </div>
-
       </div>
 
-      {/* Painel Inferior */}
+      {/* Painel Inferior de Controles */}
       <div className="p-6 bg-gradient-to-t from-gray-950 via-gray-950/90 to-transparent z-10">
         <CallControls
           isMuted={isMuted}
@@ -202,13 +315,7 @@ function VideoWindow({ participant }: { participant: Participant }) {
 
   return (
     <div className="w-full h-full relative bg-gray-950">
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted={participant.isLocal} 
-        className="w-full h-full object-cover rounded-xl"
-      />
+      <video ref={videoRef} autoPlay playsInline muted={participant.isLocal} className="w-full h-full object-cover rounded-xl" />
       <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-md text-xs font-medium border border-gray-800 z-10">
         {participant.name}
       </div>

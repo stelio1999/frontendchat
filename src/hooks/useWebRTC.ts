@@ -21,6 +21,11 @@ export const useWebRTC = (roomId: string) => {
   const isCallingRef = useRef<boolean>(false) // 🔥 Bloqueia execuções simultâneas do startCall
 
 
+const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const combinedStreamRef = useRef<MediaStream | null>(null)
+
   const initLocalStream = useCallback(async () => {
   if (localStreamRef.current) {
     return localStreamRef.current
@@ -238,10 +243,99 @@ export const useWebRTC = (roomId: string) => {
     }
   }, [])
 
+
+const startRecording = useCallback(async () => {
+    try {
+      // 1. Captura o áudio do sistema (Aba/Ecrã) - O utilizador deve marcar "Partilhar áudio"
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true, // Necessário para getDisplayMedia, podemos ignorar o vídeo depois
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      })
+
+      // 2. Captura o microfone local (se já não estiver ativo no localStreamRef)
+      const micStream = localStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true })
+
+      // 3. Misturar as tracks de áudio num único Stream
+      const audioContext = new AudioContext()
+      const dest = audioContext.createMediaStreamDestination()
+
+      // Origem 1: Áudio do Sistema (Outros participantes)
+      if (screenStream.getAudioTracks().length > 0) {
+        const source1 = audioContext.createMediaStreamSource(screenStream)
+        source1.connect(dest)
+      }
+
+      // Origem 2: Teu Microfone
+      if (micStream.getAudioTracks().length > 0) {
+        const source2 = audioContext.createMediaStreamSource(micStream)
+        source2.connect(dest)
+      }
+
+      combinedStreamRef.current = dest.stream
+      audioChunksRef.current = []
+
+      // 4. Iniciar o Gravador
+      const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' })
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data)
+      }
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        
+        // Parar todas as tracks do ecrã para fechar o modal de partilha
+        screenStream.getTracks().forEach(track => track.stop())
+
+        // Enviar o ficheiro de áudio para o backend processar com o Gemini
+        await sendAudioToBackend(audioBlob)
+      }
+
+      recorder.start(1000) // Grava em blocos a cada 1 segundo
+      setIsRecording(true)
+      console.log("🎤 Gravação de áudio interno iniciada...")
+    } catch (err) {
+      console.error("Erro ao iniciar captura interna de áudio:", err)
+    }
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      console.log("🛑 Gravação de áudio interrompida.")
+    }
+  }, [isRecording])
+
+  const sendAudioToBackend = async (blob: Blob) => {
+    const formData = new FormData()
+    formData.append('audio', blob, 'reuniao.webm')
+    formData.append('roomId', roomId)
+    formData.append('date', new Date().toISOString().split('T')[0])
+
+    try {
+      const response = await fetch('http://localhost:3000/api/meeting/process', {
+        method: 'POST',
+        body: formData
+      })
+      const data = await response.json()
+      console.log("Processamento concluído. Ficheiro guardado:", data.txtPath)
+    } catch (error) {
+      console.error("Erro ao enviar áudio para o servidor:", error)
+    }
+  }
+
   return {
     localStream,
     participants,
     startCall,
     endCall,
+    isRecording,
+    startRecording,
+    stopRecording
   }
 }

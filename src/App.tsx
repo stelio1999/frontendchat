@@ -21,7 +21,7 @@ import { ChatProvider } from './contexts/ChatContext'
 import socket from './services/socket'
 import ConnectionTest from './components/call/ConnectionTest'
 import VideoCall from './components/call/VideoCall' // ◀️ Altere aqui o import se necessário
-
+import PostMeetingPanel from './pages/PostMeetingPanel'
 
 
 function App() {
@@ -63,6 +63,7 @@ function App() {
                 <Route path="calls" element={<Calls />} />
                 <Route path="call-history" element={<CallHistory />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="/post-meeting" element={<PostMeetingPanel />} />
               </Route>
             </Route>
           </Routes>

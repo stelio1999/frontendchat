@@ -6,9 +6,11 @@ import Header from '../components/layout/Header'
 import Avatar from '../components/common/Avatar'
 import Skeleton from '../components/common/Skeleton'
 import api from '../services/api'
-import { format, formatDistanceToNow } from 'date-fns'
+//import { format, formatDistanceToNow } from 'date-fns'
 import { pt } from 'date-fns/locale'
 import toast from 'react-hot-toast'
+// Altera o import existente para incluir o parseISO
+import { format, formatDistanceToNow, parseISO } from 'date-fns'
 
 interface CallHistoryItem {
   id: string
@@ -44,8 +46,15 @@ export default function CallHistory() {
 
   const groupByDate = () => {
     const groups: { [key: string]: CallHistoryItem[] } = {}
+    
     history.forEach(call => {
-      const dateKey = format(new Date(call.createdAt), 'yyyy-MM-dd')
+      // Se por algum motivo o createdAt falhar ou vier vazio, evita crashar a aplicação
+      if (!call.createdAt) return 
+
+      // Converte a string ISO da API de forma segura para um objeto Date
+      const parsedDate = typeof call.createdAt === 'string' ? parseISO(call.createdAt) : new Date(call.createdAt)
+      
+      const dateKey = format(parsedDate, 'yyyy-MM-dd')
       if (!groups[dateKey]) groups[dateKey] = []
       groups[dateKey].push(call)
     })
@@ -145,13 +154,15 @@ export default function CallHistory() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm text-gray-500">
-                          {format(new Date(call.createdAt), 'HH:mm')}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {formatDistanceToNow(new Date(call.createdAt), { addSuffix: true, locale: pt })}
-                        </p>
-                      </div>
+  <p className="text-sm text-gray-500">
+    {/* 🔥 Atualizado para converter string com segurança */}
+    {format(typeof call.createdAt === 'string' ? parseISO(call.createdAt) : new Date(call.createdAt), 'HH:mm')}
+  </p>
+  <p className="text-xs text-gray-400">
+    {/* 🔥 Atualizado para converter string com segurança */}
+    {formatDistanceToNow(typeof call.createdAt === 'string' ? parseISO(call.createdAt) : new Date(call.createdAt), { addSuffix: true, locale: pt })}
+  </p>
+</div>
                     </motion.div>
                   ))}
                 </div>
