@@ -23,7 +23,7 @@ export default function Register() {
           </div>
           
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            Bem-vindo ao WhatsApp Clone
+            Bem-vindo ao Tsangano
           </h1>
           
           <p className="text-gray-500 dark:text-gray-400 mb-8">

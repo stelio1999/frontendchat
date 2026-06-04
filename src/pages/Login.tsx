@@ -34,7 +34,7 @@ export default function Login() {
             <div className="w-20 h-20 bg-whatsapp-green rounded-full flex items-center justify-center mb-4">
               <MessageCircle className="w-12 h-12 text-white" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">WhatsApp Clone</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Tsangano</h1>
             <p className="text-gray-500 dark:text-gray-400 mt-2">Bem-vindo de volta!</p>
           </div>
 

@@ -135,7 +135,7 @@ export default function Settings() {
 
           {/* Version */}
           <p className="text-center text-xs text-gray-400 py-4">
-            Versão 1.0.0 • © 2024 WhatsApp Clone Moçambique
+            Versão 1.0.0 • © 2024 Tsangano Moçambique
           </p>
         </div>
       </div>
