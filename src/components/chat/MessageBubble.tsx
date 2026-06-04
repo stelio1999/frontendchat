@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { format } from 'date-fns'
 import { pt } from 'date-fns/locale'
-import { Check, CheckCheck, Copy, Reply, Trash2, Download } from 'lucide-react'
+import { Check, CheckCheck, Copy, Reply, Trash2, Download, Video, Phone, ArrowRight } from 'lucide-react'
 import Avatar from '../common/Avatar'
 import { Message } from '../../types/chat.types'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 interface MessageBubbleProps {
@@ -15,14 +16,10 @@ interface MessageBubbleProps {
 
 const safeTime = (date?: string | Date | null) => {
   if (!date) return '--:--'
-
   const parsed = new Date(date)
-
-  // verifica se é realmente válido
   if (!(parsed instanceof Date) || isNaN(parsed.getTime())) {
     return '--:--'
   }
-
   try {
     return format(parsed, 'HH:mm', { locale: pt })
   } catch (err) {
@@ -30,6 +27,38 @@ const safeTime = (date?: string | Date | null) => {
   }
 }
 
+// 🟢 CARD DE CHAMADA INTEGRADO
+function ActiveCallCard({ chatId, callType }: { chatId: string; callType: string }) {
+  const navigate = useNavigate()
+  return (
+    <div className="flex justify-center my-3 w-full animate-fade-in text-white">
+      <div className="bg-gradient-to-r from-gray-950 to-gray-900 border border-gray-800 shadow-2xl rounded-2xl p-5 max-w-sm w-full">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400 border border-emerald-500/20">
+            {callType === 'video' ? <Video size={24} /> : <Phone size={24} />}
+          </div>
+          <div className="text-left flex-1">
+            <h4 className="font-semibold text-sm tracking-wide text-gray-100">
+              Reunião de Grupo Iniciada
+            </h4>
+            <p className="text-xs text-gray-400 capitalize">
+              Chamada de {callType === 'video' ? 'Vídeo' : 'Voz'} ativa
+            </p>
+          </div>
+        </div>
+        
+        <button
+          type="button"
+          onClick={() => navigate(`/group-call/${chatId}?type=${callType}`)}
+          className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-medium text-sm py-2.5 px-4 rounded-xl transition shadow-lg shadow-emerald-500/20 active:scale-[0.98] cursor-pointer"
+        >
+          Entrar na Reunião
+          <ArrowRight size={16} />
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function MessageBubble({
   message,
@@ -40,6 +69,16 @@ export default function MessageBubble({
   const [showActions, setShowActions] = useState(false)
   const isFile = message.fileUrl
   const fileType = message.fileType?.split('/')[0]
+
+  // 🕵️‍♂️ INTERCEPTOR DA CHAMADA ATIVA
+  const rawContent = message.content || ''
+  const callRegex = /\[CALL_GROUP_ACTIVE\]:([a-zA-Z0-9-]+):(video|voice)/i
+  const match = rawContent.match(callRegex)
+
+  // Se a mensagem for um comando de chamada, renderiza o card especial e ignora o balão normal
+  if (match) {
+    return <ActiveCallCard chatId={match[1]} callType={match[2]} />
+  }
 
   const copyText = () => {
     navigator.clipboard.writeText(message.content)
@@ -143,12 +182,12 @@ export default function MessageBubble({
                 </button>
               )}
               <button
-  onClick={() => onDelete?.(message.id)}
-  className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors text-red-500"
-  title="Apagar"
->
-  <Trash2 size={14} />
-</button>
+                onClick={() => onDelete?.(message.id)}
+                className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors text-red-500"
+                title="Apagar"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
           )}
         </div>

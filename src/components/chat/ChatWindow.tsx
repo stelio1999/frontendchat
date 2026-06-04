@@ -259,10 +259,10 @@ export default function ChatWindow({ chat, onClose }: ChatWindowProps) {
                 transition={{ delay: Math.min(index * 0.02, 0.5) }}
               >
                 <MessageBubble
-                  message={message}
-                  isOwn={message.senderId === user?.id}
-                  showAvatar={messages[index - 1]?.senderId !== message.senderId}
-                />
+      message={message}
+      isOwn={message.senderId === user?.id}
+      showAvatar={messages[index - 1]?.senderId !== message.senderId}
+    />
               </motion.div>
             ))
           )}
